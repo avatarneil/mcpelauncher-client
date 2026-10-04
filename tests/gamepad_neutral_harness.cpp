@@ -10,11 +10,17 @@
 #include <vector>
 
 enum class GamepadAxisId { LEFT_X, LEFT_Y, RIGHT_X, RIGHT_Y, LEFT_TRIGGER, RIGHT_TRIGGER };
-enum class GamepadButtonId { DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT };
+enum class GamepadButtonId { DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT, A, B };
 enum { AINPUT_SOURCE_GAMEPAD, AMOTION_EVENT_ACTION_MOVE,
        AMOTION_EVENT_AXIS_X, AMOTION_EVENT_AXIS_Y, AMOTION_EVENT_AXIS_RX,
        AMOTION_EVENT_AXIS_RY, AMOTION_EVENT_AXIS_BRAKE, AMOTION_EVENT_AXIS_GAS,
-       AMOTION_EVENT_AXIS_HAT_X, AMOTION_EVENT_AXIS_HAT_Y };
+       AMOTION_EVENT_AXIS_HAT_X, AMOTION_EVENT_AXIS_HAT_Y,
+       AKEY_EVENT_ACTION_DOWN, AKEY_EVENT_ACTION_UP };
+struct GameActivityKeyEvent { int source, deviceId, action, keyCode; };
+struct FakeKeyEvent {
+    int action, keyCode;
+    FakeKeyEvent(int, int, int action, int keyCode) : action(action), keyCode(keyCode) {}
+};
 struct GameActivityMotionEvent {
     int source, deviceId, action, pointerCount;
     struct Pointer { int id; float axisValues[64]; } pointers[1];
@@ -31,12 +37,17 @@ struct Window {
 struct JniSupport {
     bool gameActivity = false;
     std::vector<GameActivityMotionEvent> events;
+    std::vector<GameActivityKeyEvent> keys;
     bool isGameActivityVersion() { return gameActivity; }
     void sendMotionEvent(GameActivityMotionEvent* event) { events.push_back(*event); }
+    void sendKeyDown(GameActivityKeyEvent* event) { keys.push_back(*event); }
+    void sendKeyUp(GameActivityKeyEvent* event) { keys.push_back(*event); }
 };
 struct InputQueue {
     std::vector<FakeMotionEvent> events;
+    std::vector<FakeKeyEvent> keys;
     void addEvent(FakeMotionEvent event) { events.push_back(event); }
+    void addEvent(FakeKeyEvent event) { keys.push_back(event); }
 };
 struct WindowCallbacks {
     enum class InputMode { Touch, Mouse, Gamepad, Unknown };
@@ -55,6 +66,8 @@ struct WindowCallbacks {
     void setCursorLocked(bool locked);
     void queueGamepadAxisInputIfNeeded(int gamepad);
     void onGamepadAxis(int gamepad, GamepadAxisId axis, float value);
+    void onGamepadButton(int gamepad, GamepadButtonId button, bool pressed);
+    static int mapGamepadToAndroidKey(GamepadButtonId button) { return static_cast<int>(button); }
 };
 
 // PRODUCTION_METHODS
@@ -159,6 +172,43 @@ int main() {
     try { callbacks.onGamepadAxis(1, static_cast<GamepadAxisId>(6), 0.f); }
     catch(const std::runtime_error&) { threw = true; }
     assert(threw);
+    for(bool activity : {false, true}) {
+        for(auto button : {GamepadButtonId::A, GamepadButtonId::B, GamepadButtonId::DPAD_LEFT}) {
+            WindowCallbacks release;
+            release.jniSupport.gameActivity = activity;
+            release.onGamepadButton(1, button, true);
+            assert(release.gamepads.at(1).button[static_cast<int>(button)]);
+            assert(release.hasInputMode(Mode::Mouse));
+            release.onGamepadButton(1, button, false);
+            assert(!release.gamepads.at(1).button[static_cast<int>(button)]);
+            assert(release.inputMode == Mode::Mouse);
+            if(button == GamepadButtonId::DPAD_LEFT) {
+                if(activity)
+                    assert(release.jniSupport.events.back().pointers[0].axisValues[AMOTION_EVENT_AXIS_HAT_X] == 0.f);
+                else
+                    assert(release.inputQueue.events.back().axisFunction(AMOTION_EVENT_AXIS_HAT_X) == 0.f);
+            } else {
+                if(activity) {
+                    assert(release.jniSupport.keys.size() == 2);
+                    assert(release.jniSupport.keys.back().action == AKEY_EVENT_ACTION_UP);
+                } else {
+                    assert(release.inputQueue.keys.size() == 2);
+                    assert(release.inputQueue.keys.back().action == AKEY_EVENT_ACTION_UP);
+                }
+            }
+            ++scenarios;
+        }
+    }
+    for(bool startup : {false, true}) {
+        WindowCallbacks blocked;
+        blocked.gamepads.at(1).button[static_cast<int>(GamepadButtonId::A)] = true;
+        blocked.sendEvents = !startup;
+        blocked.forcedMode = startup ? Mode::Unknown : Mode::Mouse;
+        blocked.onGamepadButton(1, GamepadButtonId::A, false);
+        assert(blocked.gamepads.at(1).button[static_cast<int>(GamepadButtonId::A)]);
+        assert(blocked.inputQueue.keys.empty());
+        ++scenarios;
+    }
     for(bool activity : {false, true}) {
         WindowCallbacks mixed;
         mixed.jniSupport.gameActivity = activity;

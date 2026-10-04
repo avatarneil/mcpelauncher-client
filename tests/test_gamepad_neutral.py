@@ -35,6 +35,7 @@ def main():
         'void WindowCallbacks::setCursorLocked(',
         'void WindowCallbacks::queueGamepadAxisInputIfNeeded(',
         'void WindowCallbacks::onGamepadAxis(',
+        'void WindowCallbacks::onGamepadButton(',
     ])
     harness = (root / 'tests/gamepad_neutral_harness.cpp').read_text()
     with tempfile.TemporaryDirectory(prefix='gamepad-neutral-') as directory:

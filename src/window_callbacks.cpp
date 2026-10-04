@@ -636,7 +636,10 @@ void WindowCallbacks::queueGamepadAxisInputIfNeeded(int gamepad) {
 }
 
 void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pressed) {
-    if(hasInputMode(InputMode::Gamepad)) {
+    bool accepted = hasInputMode(InputMode::Gamepad, pressed);
+    // Release previously delivered buttons without reclaiming gamepad mode.
+    // This also clears D-pad state through the motion-event path below.
+    if(accepted || (sendEvents && forcedMode == InputMode::Unknown && !pressed)) {
         auto gpi = gamepads.find(gamepad);
         if(gpi == gamepads.end())
             return;
