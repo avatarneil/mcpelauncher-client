@@ -20,6 +20,7 @@ WindowCallbacks::WindowCallbacks(GameWindow& window, JniSupport& jniSupport, Fak
         window.setFullscreen(true);
     }
     useRawInput = ReadEnvFlag("MCPELAUNCHER_CLIENT_RAW_INPUT");
+    useMixedInput = ReadEnvFlag("MCPELAUNCHER_CLIENT_MIXED_INPUT");
     forcedMode = (InputMode)ReadEnvInt("MCPELAUNCHER_CLIENT_FORCED_INPUT_MODE", (int)forcedMode);
     inputModeSwitchDelay = ReadEnvInt("MCPELAUNCHER_CLIENT_INPUT_SWITCH_DELAY", inputModeSwitchDelay);
 }
@@ -73,8 +74,12 @@ void WindowCallbacks::onWindowSizeCallback(int w, int h) {
 }
 
 void WindowCallbacks::setCursorLocked(bool locked) {
+    bool wasLocked = cursorLocked;
     cursorLocked = locked;
-    if(hasInputMode(InputMode::Mouse, false))
+    // Leaving mixed-input gameplay must restore absolute mouse input even if
+    // the last event was from the controller. Forced modes still take priority.
+    bool leavingMixedInput = useMixedInput && wasLocked && !locked && inputMode == InputMode::Gamepad;
+    if(hasInputMode(InputMode::Mouse, leavingMixedInput))
         window.setCursorDisabled(locked);
 }
 
@@ -105,7 +110,11 @@ bool WindowCallbacks::hasInputMode(WindowCallbacks::InputMode want, bool changeM
         return want == forcedMode;
     }
     auto now = std::chrono::high_resolution_clock::now();
-    if(inputMode == want || (changeMode && ((int)want < (int)inputMode || (now - lastUpdated) > std::chrono::milliseconds(inputModeSwitchDelay)))) {
+    // Only mix mouse and controller input while Minecraft requests capture.
+    // Unlike raw input, keep mode/cursor bookkeeping and normal menu filtering.
+    bool mixedInput = useMixedInput && cursorLocked && inputMode != InputMode::Touch &&
+                      (want == InputMode::Mouse || want == InputMode::Gamepad);
+    if(inputMode == want || mixedInput || (changeMode && ((int)want < (int)inputMode || (now - lastUpdated) > std::chrono::milliseconds(inputModeSwitchDelay)))) {
         if(inputMode != want) {
 #ifndef NDEBUG
             printf("Input Mode changed to %d\n", (int)want);
@@ -663,16 +672,21 @@ void WindowCallbacks::onGamepadButton(int gamepad, GamepadButtonId btn, bool pre
 }
 
 void WindowCallbacks::onGamepadAxis(int gamepad, GamepadAxisId ax, float value) {
-    if(hasInputMode(InputMode::Gamepad, std::abs(value) > 0.4f)) {
-        auto gpi = gamepads.find(gamepad);
-        if(gpi == gamepads.end())
-            return;
-        auto& gp = gpi->second;
-        if((int)ax < 0 || (int)ax >= 6)
-            throw std::runtime_error("bad axis id");
-        gp.axis[(int)ax] = value;
-        queueGamepadAxisInputIfNeeded(gamepad);
-    }
+    bool accepted = hasInputMode(InputMode::Gamepad, std::abs(value) > 0.4f);
+    // A neutral axis cannot reclaim gamepad mode, but must release movement
+    // already sent to the game. Keep startup and explicit mode filtering intact.
+    if(!accepted && (!sendEvents || forcedMode != InputMode::Unknown || value != 0.f))
+        return;
+    auto gpi = gamepads.find(gamepad);
+    if(gpi == gamepads.end())
+        return;
+    auto& gp = gpi->second;
+    if((int)ax < 0 || (int)ax >= 6)
+        throw std::runtime_error("bad axis id");
+    if(!accepted && gp.axis[(int)ax] == 0.f)
+        return;
+    gp.axis[(int)ax] = value;
+    queueGamepadAxisInputIfNeeded(gamepad);
 }
 
 void WindowCallbacks::addKeyboardCallback(void* user, bool (*callback)(void* user, int keyCode, int action)) {

@@ -68,6 +68,7 @@ private:
     };
     int imGuiTouchId = -1;
     bool useRawInput = false;
+    bool useMixedInput = false;
     InputMode inputMode = InputMode::Unknown;
     InputMode forcedMode = InputMode::Unknown;
     int inputModeSwitchDelay = 100;
