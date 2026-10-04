@@ -1,10 +1,10 @@
-# Gamepad neutral regression
+# Gamepad release regressions
 
 Run `python3 tests/test_gamepad_neutral.py` with Python 3 and a C++17 compiler.
 Set `CXX` to select a compiler. AddressSanitizer and UndefinedBehaviorSanitizer
 must be supported.
 
-The runner extracts `hasInputMode`, `onGamepadAxis`, `setCursorLocked`, and
+The runner extracts `hasInputMode`, `onGamepadAxis`, `onGamepadButton`, `setCursorLocked`, and
 `queueGamepadAxisInputIfNeeded` directly from `src/window_callbacks.cpp` and
 compiles them with the recording platform doubles in
 `gamepad_neutral_harness.cpp`. It tests production method bodies without
@@ -23,6 +23,12 @@ mode takes over and the controller sends zero. The fixed source covers all
 six axes, both input delivery paths, queued versus consumed legacy events,
 zero/default switch delays, repeated neutral events, startup and forced-mode
 filtering, raw-input behavior, and disconnected-device queue reads.
+
+Button-release coverage checks that a delivered A/B button press or D-pad state
+is released after mouse takeover in both delivery paths, without reclaiming
+gamepad mode. Redundant releases and startup/forced-mode restrictions remain
+filtered. The harness currently passes 40 release/guard scenarios, plus its
+filtering and invalid-device checks.
 
 The neutral-release portion forwards an exact zero for previously nonzero axes rejected
 by normal mode filtering. It does not forward new nonzero gamepad input while
