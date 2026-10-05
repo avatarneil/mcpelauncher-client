@@ -2,7 +2,9 @@
 #include "gl_core_patch.h"
 #include "settings.h"
 #include "imgui_ui.h"
+#include "gles_arm64_bridge.h"
 #include <map>
+#include <cstdlib>
 
 #define __ANDROID__
 #include <EGL/egl.h>
@@ -208,6 +210,28 @@ void FakeEGL::setupGLOverrides() {
     fake_egl::hostProcOverrides["glVertexAttribDivisorOES"] = nullptr;
     // MESA 23.1 blackscreen Workaround End
     fake_egl::hostProcOverrides["glInvalidateFramebuffer"] = (void *)+[]() {};  // Stub for a NVIDIA bug
+#if defined(__APPLE__) && defined(__aarch64__)
+    const char* vibrantVisuals = std::getenv("MCPELAUNCHER_VIBRANT_VISUALS");
+    const char* arm64Bridge = std::getenv("MCPELAUNCHER_VIBRANT_ARM64_BRIDGE");
+    if(arm64Bridge && std::strcmp(arm64Bridge, "1") == 0 &&
+       vibrantVisuals && std::strcmp(vibrantVisuals, "1") == 0) {
+#define BRIDGE_GLES(Name, Type) \
+        { static Type target = reinterpret_cast<Type>(fake_egl::hostProcAddrFn(Name)); \
+          if(target) fake_egl::hostProcOverrides[Name] = reinterpret_cast<void*>(&AndroidGLESBridge<target>::invoke); }
+        BRIDGE_GLES("glCopyImageSubData", GLESCopyImage);
+        BRIDGE_GLES("glCopyImageSubDataEXT", GLESCopyImage);
+        BRIDGE_GLES("glCopyImageSubDataOES", GLESCopyImage);
+        BRIDGE_GLES("glBlitFramebuffer", GLESBlitFramebuffer);
+        BRIDGE_GLES("glBlitFramebufferANGLE", GLESBlitFramebuffer);
+        BRIDGE_GLES("glBlitFramebufferNV", GLESBlitFramebuffer);
+        BRIDGE_GLES("glTexSubImage3D", GLESTexSubImage3D);
+        BRIDGE_GLES("glTexSubImage3DOES", GLESTexSubImage3D);
+        BRIDGE_GLES("glCompressedTexSubImage3D", GLESCompressedTexSubImage3D);
+        BRIDGE_GLES("glCompressedTexSubImage3DOES", GLESCompressedTexSubImage3D);
+#undef BRIDGE_GLES
+        Log::info("VibrantGL", "Android ARM64 stack-argument bridges installed for image copy, blit and 3D upload");
+    }
+#endif
     if(FakeEGL::enableTexturePatch) {
         // Minecraft Intel/Amd Texture Bug 1.16.210-1.17.2 and beyond
         // This patch reduces the visual glitch of blocks, does not work with high resolution textures
