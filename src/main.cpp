@@ -262,7 +262,12 @@ int main(int argc, char* argv[]) {
             properties::property<int> graphicsMode(properties, "graphics_mode", 2);
             parseOptions(properties);
             auto oldOption = graphicsMode.get();
-            if(oldOption != 0 && oldOption != 1) {
+            const char* vibrantVisuals = getenv("MCPELAUNCHER_VIBRANT_VISUALS");
+            const bool allowVibrantVisuals = vibrantVisuals && strcmp(vibrantVisuals, "1") == 0;
+            if(allowVibrantVisuals) {
+                Log::warn("Launcher", "Vibrant Visuals enabled for this isolated macOS graphics build");
+            }
+            if(!allowVibrantVisuals && oldOption != 0 && oldOption != 1) {
                 Log::warn("Launcher", "Vibrant Visuals via MoltenVK are not supported yet and causing rendering issues, disabling this graphics mode!");
                 graphicsMode.set(1);
                 saveOptions(properties);
